@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, signal } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, ChangeDetectorRef } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -32,7 +32,7 @@ export class App implements OnInit, OnDestroy {
   
   connectionState = 'Disconnected';
   
-  constructor() {}
+  constructor(private cdr: ChangeDetectorRef) {}
   
   ngOnInit(): void {
     console.log('App initialized');
@@ -58,24 +58,29 @@ export class App implements OnInit, OnDestroy {
       };
       
       this.devices.push(device);
+      this.cdr.detectChanges();
       
       try {
         await service.startConnection(deviceName);
         device.connected = true;
         device.status = 'Connected';
+        this.cdr.detectChanges();
         
         // Subscribe to messages for the first device only (to avoid duplicates)
         if (i === 0) {
           service.messages$.subscribe(messages => {
             this.messages = messages;
+            this.cdr.detectChanges();
           });
           
           service.connectedDevices$.subscribe(devices => {
             this.connectedDevices = devices;
+            this.cdr.detectChanges();
           });
           
           service.connectionState$.subscribe(state => {
             this.connectionState = state;
+            this.cdr.detectChanges();
           });
         }
         
@@ -83,6 +88,7 @@ export class App implements OnInit, OnDestroy {
       } catch (error) {
         device.connected = false;
         device.status = 'Error';
+        this.cdr.detectChanges();
         console.error(`Error connecting ${deviceName}:`, error);
       }
       

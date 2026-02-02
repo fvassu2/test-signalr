@@ -29,7 +29,8 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-app.UseHttpsRedirection();
+// Comment out HTTPS redirection for development to allow HTTP connections
+// app.UseHttpsRedirection();
 
 // Enable CORS
 app.UseCors("AllowAngularClient");
