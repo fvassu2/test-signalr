@@ -1,0 +1,19 @@
+# Backend
+Backend/bin/
+Backend/obj/
+Backend/.vs/
+
+# Frontend
+Frontend/node_modules/
+Frontend/dist/
+Frontend/.angular/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
