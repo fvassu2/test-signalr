@@ -19,10 +19,13 @@ export class TabletComponent implements OnInit, OnDestroy {
     // Form inputs
     clientName = '';
     messageText = '';
+    selectedRecipientId: string | null = null; // Client selezionato per messaggio privato
 
     // State
     isConnecting = false;
     error: string | null = null;
+    showConnectionCard = true; // Mostra la card di connessione
+    clientsAccordionOpen = false; // Accordion client connessi
 
     // Getters per leggere i signals
     get identity() {
@@ -42,16 +45,58 @@ export class TabletComponent implements OnInit, OnDestroy {
     }
 
     get connectedClients() {
-        return this.signalR.connectedClients();
+        // "Tu" sempre in cima, poi escludi te stesso e i manager (messaggi privati solo tra tablet)
+        const all = this.signalR.connectedClients();
+        const me = all.filter(c => c.deviceId === this.identity?.clientId);
+        const otherTablets = all.filter(c =>
+            c.deviceId !== this.identity?.clientId &&
+            c.deviceType === 'tablet'
+        );
+        const managers = all.filter(c => c.deviceType === 'manager');
+
+        return [...me, ...otherTablets, ...managers];
+    }
+
+    get availableRecipients() {
+        // Solo altri tablet (escludi te stesso e i manager)
+        return this.signalR.connectedClients().filter(c =>
+            c.deviceId !== this.identity?.clientId &&
+            c.deviceType === 'tablet'
+        );
+    }
+
+    isMessagePrivate(msg: MessageData): boolean {
+        // Un messaggio è privato se ha targetClientId E sono coinvolto (mittente o destinatario)
+        if (!msg.targetClientId) return false;
+        return msg.targetClientId === this.identity?.clientId ||
+            msg.senderId === this.identity?.clientId;
+    }
+
+    getMessageClass(msg: MessageData): string {
+        const senderId = msg.senderId;
+        const senderType = this.connectedClients.find(c => c.deviceId === senderId)?.deviceType;
+
+        if (senderId === this.identity?.clientId) {
+            return 'message-mine'; // I miei messaggi
+        } else if (senderType === 'manager') {
+            return 'message-manager'; // Messaggi dal manager
+        } else {
+            return 'message-other'; // Messaggi da altri tablet
+        }
     }
 
     ngOnInit(): void {
         // Inizializza l'identità come tablet
-        const identity = this.clientIdentity.initialize('tablet');
+        const { identity, isNew } = this.clientIdentity.initialize('tablet');
         this.clientName = identity.clientName;
-    }
 
-    ngOnDestroy(): void {
+        // Auto-connect solo se è un'identità esistente (refresh della pagina)
+        // Se è nuova, l'utente deve cliccare "Connetti" manualmente
+        if (!isNew && !this.isConnected) {
+            console.log('Auto-connecting (existing identity)...');
+            this.connect();
+        }
+    } ngOnDestroy(): void {
         this.signalR.disconnectAll();
     }
 
@@ -72,6 +117,9 @@ export class TabletComponent implements OnInit, OnDestroy {
 
             // Richiedi la lista dei client connessi
             await this.signalR.requestConnectedClients('devices');
+
+            // Nascondi la card di connessione
+            this.showConnectionCard = false;
         } catch (err) {
             this.error = err instanceof Error ? err.message : 'Errore di connessione';
             console.error('Connection error:', err);
@@ -82,17 +130,39 @@ export class TabletComponent implements OnInit, OnDestroy {
 
     async disconnect(): Promise<void> {
         await this.signalR.disconnectAll();
+        this.showConnectionCard = true; // Mostra di nuovo la card
+    }
+
+    toggleClientsAccordion(): void {
+        this.clientsAccordionOpen = !this.clientsAccordionOpen;
     }
 
     async sendMessage(): Promise<void> {
         if (!this.messageText.trim()) return;
 
         try {
-            await this.signalR.sendMessage('devices', this.messageText);
+            if (this.selectedRecipientId) {
+                // Messaggio privato
+                await this.signalR.sendMessageToClient('devices', this.selectedRecipientId, this.messageText);
+            } else {
+                // Messaggio broadcast
+                await this.signalR.sendMessage('devices', this.messageText);
+            }
             this.messageText = '';
         } catch (err) {
             console.error('Error sending message:', err);
         }
+    }
+
+    selectRecipient(clientId: string | null): void {
+        // Toggle selezione
+        this.selectedRecipientId = this.selectedRecipientId === clientId ? null : clientId;
+    }
+
+    getRecipientName(): string {
+        if (!this.selectedRecipientId) return '';
+        const recipient = this.connectedClients.find(c => c.deviceId === this.selectedRecipientId);
+        return recipient?.deviceName || '';
     }
 
     clearMessages(): void {

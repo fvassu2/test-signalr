@@ -113,9 +113,6 @@
       <!-- Private Message -->
       <div class="message-section" *ngIf="selectedClientId">
         <h3>🔒 Messaggio privato</h3>
-        <p class="selected-client">
-          Destinatario: <strong>{{ connectedClients | json }}</strong>
-        </p>
         <div class="message-input-group">
           <input 
             type="text" 
@@ -141,6 +138,9 @@
             class="log-message"
             [class.is-mine]="msg.senderId === identity?.clientId"
           >
+            <span class="privacy-icon" [title]="isMessagePrivate(msg) ? 'Privato' : 'Pubblico'">
+              {{ isMessagePrivate(msg) ? '🔒' : '📢' }}
+            </span>
             <span class="log-time">{{ formatTime(msg.timestamp) }}</span>
             <span class="log-sender">{{ msg.senderName }}:</span>
             <span class="log-text">{{ msg.message }}</span>

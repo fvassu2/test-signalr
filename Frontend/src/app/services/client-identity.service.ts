@@ -31,15 +31,16 @@ export class ClientIdentityService {
      * Inizializza o crea l'identità del client.
      * @param clientType - Tipo di client (tablet o manager)
      * @param customName - Nome personalizzato (opzionale)
+     * @returns { identity, isNew } - L'identità e un flag che indica se è stata appena creata
      */
-    public initialize(clientType: ClientType, customName?: string): ClientIdentity {
+    public initialize(clientType: ClientType, customName?: string): { identity: ClientIdentity; isNew: boolean } {
         // Controlla se esiste già un'identità per questa tab
         let existing = this.identity();
 
         // Se esiste già e il tipo è lo stesso, riusa
         if (existing && existing.clientType === clientType) {
             console.log('Using existing client identity:', existing);
-            return existing;
+            return { identity: existing, isNew: false };
         }
 
         // Crea una nuova identità
@@ -54,7 +55,7 @@ export class ClientIdentityService {
         this.identity.set(newIdentity);
 
         console.log('Created new client identity:', newIdentity);
-        return newIdentity;
+        return { identity: newIdentity, isNew: true };
     }
 
     /**

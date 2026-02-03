@@ -13,8 +13,8 @@ import { DeviceInfo, HubConnectionInfo, MessageData } from '../../models/signalr
     styleUrl: './manager.component.css'
 })
 export class ManagerComponent implements OnInit, OnDestroy {
-    private signalR = inject(SignalRService);
-    private clientIdentity = inject(ClientIdentityService);
+    private signalRService = inject(SignalRService);
+    private clientIdentityService = inject(ClientIdentityService);
 
     // Form inputs
     broadcastMessage = '';
@@ -27,19 +27,19 @@ export class ManagerComponent implements OnInit, OnDestroy {
 
     // Getters
     get identity() {
-        return this.clientIdentity.identity();
+        return this.clientIdentityService.identity();
     }
 
     get hubStates(): HubConnectionInfo[] {
-        return Array.from(this.signalR.hubStates().values());
+        return Array.from(this.signalRService.hubStates().values());
     }
 
     get isConnected(): boolean {
-        return this.signalR.isAnyConnected();
+        return this.signalRService.isAnyConnected();
     }
 
     get connectedClients(): DeviceInfo[] {
-        return this.signalR.connectedClients();
+        return this.signalRService.connectedClients();
     }
 
     get tablets(): DeviceInfo[] {
@@ -51,22 +51,25 @@ export class ManagerComponent implements OnInit, OnDestroy {
     }
 
     get messages(): MessageData[] {
-        return this.signalR.messages();
+        return this.signalRService.messages();
     }
 
     get lastNotification() {
-        return this.signalR.notification();
+        return this.signalRService.notification();
     }
 
     ngOnInit(): void {
         // Inizializza come manager
-        this.clientIdentity.initialize('manager');
-        // Auto-connect
-        this.connect();
+        const { isNew } = this.clientIdentityService.initialize('manager');
+        // Auto-connect solo se è un'identità esistente (manager di solito si riconnette sempre)
+        // Ma rispettiamo la stessa logica del tablet per coerenza
+        if (!isNew) {
+            this.connect();
+        }
     }
 
     ngOnDestroy(): void {
-        this.signalR.disconnectAll();
+        this.signalRService.disconnectAll();
     }
 
     async connect(): Promise<void> {
@@ -76,11 +79,11 @@ export class ManagerComponent implements OnInit, OnDestroy {
         this.error = null;
 
         try {
-            const identity = this.clientIdentity.getIdentityOrThrow();
-            await this.signalR.connect(identity);
+            const identity = this.clientIdentityService.getIdentityOrThrow();
+            await this.signalRService.connect(identity);
 
             // Richiedi subito la lista dei client
-            await this.signalR.requestConnectedClients('devices');
+            await this.signalRService.requestConnectedClients('devices');
         } catch (err) {
             this.error = err instanceof Error ? err.message : 'Errore di connessione';
             console.error('Connection error:', err);
@@ -90,14 +93,14 @@ export class ManagerComponent implements OnInit, OnDestroy {
     }
 
     async disconnect(): Promise<void> {
-        await this.signalR.disconnectAll();
+        await this.signalRService.disconnectAll();
     }
 
     async sendBroadcast(): Promise<void> {
         if (!this.broadcastMessage.trim()) return;
 
         try {
-            await this.signalR.sendMessage('devices', this.broadcastMessage);
+            await this.signalRService.sendMessage('devices', this.broadcastMessage);
             this.broadcastMessage = '';
         } catch (err) {
             console.error('Error sending broadcast:', err);
@@ -108,7 +111,7 @@ export class ManagerComponent implements OnInit, OnDestroy {
         if (!this.selectedClientId || !this.privateMessage.trim()) return;
 
         try {
-            await this.signalR.sendMessageToClient('devices', this.selectedClientId, this.privateMessage);
+            await this.signalRService.sendMessageToClient('devices', this.selectedClientId, this.privateMessage);
             this.privateMessage = '';
         } catch (err) {
             console.error('Error sending private message:', err);
@@ -120,11 +123,15 @@ export class ManagerComponent implements OnInit, OnDestroy {
     }
 
     async refreshClients(): Promise<void> {
-        await this.signalR.requestConnectedClients('devices');
+        await this.signalRService.requestConnectedClients('devices');
     }
 
     clearMessages(): void {
-        this.signalR.clearMessages();
+        this.signalRService.clearMessages();
+    }
+
+    isMessagePrivate(message: MessageData): boolean {
+        return !!message.targetClientId;
     }
 
     getStateClass(state: string): string {

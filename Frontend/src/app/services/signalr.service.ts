@@ -1,4 +1,4 @@
-import { Injectable, signal, computed } from '@angular/core';
+import { Injectable, signal, computed, inject } from '@angular/core';
 import * as signalR from '@microsoft/signalr';
 import { HubConnection, HubConnectionState } from '@microsoft/signalr';
 import {
@@ -11,6 +11,7 @@ import {
   Notification,
   ClientIdentity
 } from '../models/signalr.models';
+import { MessageStorageService } from './message-storage.service';
 
 /**
  * Configurazione di default degli Hub disponibili.
@@ -36,6 +37,8 @@ export const DEFAULT_HUB_CONFIGS: HubConfig[] = [
   providedIn: 'root'
 })
 export class SignalRService {
+  private messageStorage = inject(MessageStorageService);
+
   /** Mappa delle connessioni attive: hubName -> HubConnection */
   private connections = new Map<string, HubConnection>();
 
@@ -101,6 +104,13 @@ export class SignalRService {
   public async connect(identity: ClientIdentity, configs?: HubConfig[]): Promise<void> {
     this.clientIdentity = identity;
     this.hubConfigs = configs ?? DEFAULT_HUB_CONFIGS;
+
+    // Carica i messaggi salvati per questo client
+    const savedMessages = this.messageStorage.loadMessages(identity.clientId);
+    if (savedMessages.length > 0) {
+      console.log(`[SignalR] Loaded ${savedMessages.length} messages from storage`);
+      this.messages.set(savedMessages);
+    }
 
     // Inizializza gli stati
     const initialStates = new Map<string, HubConnectionInfo>();
@@ -227,6 +237,9 @@ export class SignalRService {
    */
   public clearMessages(): void {
     this.messages.set([]);
+    if (this.clientIdentity) {
+      this.messageStorage.clearMessages(this.clientIdentity.clientId);
+    }
   }
 
   /**
@@ -298,7 +311,14 @@ export class SignalRService {
     // Messaggio ricevuto
     connection.on('ReceiveMessage', (message: MessageData) => {
       console.log(`[${hubName}] Message received:`, message);
-      this.messages.update(msgs => [...msgs, { ...message, hubName }]);
+      this.messages.update(msgs => {
+        const updated = [...msgs, { ...message, hubName }];
+        // Salva in localStorage
+        if (this.clientIdentity) {
+          this.messageStorage.saveMessages(this.clientIdentity.clientId, updated);
+        }
+        return updated;
+      });
     });
 
     // Aggiornamento stato device

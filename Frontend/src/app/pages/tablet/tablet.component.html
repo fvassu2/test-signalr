@@ -1,13 +1,19 @@
 <div class="tablet-container">
   <header class="tablet-header">
     <h1>📱 Tablet Client</h1>
-    <p class="client-id" *ngIf="identity">
-      ID: <code>{{ identity.clientId }}</code>
-    </p>
+    <!-- Pulsante disconnect in alto a destra quando connesso -->
+    <button 
+      *ngIf="isConnected && !showConnectionCard" 
+      class="btn-disconnect-mini"
+      (click)="disconnect()"
+      title="Disconnetti"
+    >
+      ✖
+    </button>
   </header>
 
-  <!-- Connection Panel -->
-  <section class="connection-panel">
+  <!-- Connection Card - Mostra solo se non connesso O se showConnectionCard = true -->
+  <section class="connection-panel" *ngIf="!isConnected || showConnectionCard">
     <div class="input-group">
       <label for="clientName">Nome Client:</label>
       <input 
@@ -27,14 +33,6 @@
       >
         {{ isConnecting ? 'Connessione...' : 'Connetti' }}
       </button>
-      
-      <button 
-        class="btn btn-disconnect" 
-        (click)="disconnect()" 
-        [disabled]="!isConnected"
-      >
-        Disconnetti
-      </button>
     </div>
 
     <div class="error-message" *ngIf="error">
@@ -42,77 +40,114 @@
     </div>
   </section>
 
-  <!-- Hub Status -->
-  <section class="hub-status">
-    <h2>Stato Hub</h2>
-    <div class="hub-list">
-      <div 
-        *ngFor="let hub of hubStates" 
-        class="hub-item"
-        [class]="getStateClass(hub.state)"
-      >
-        <span class="hub-name">{{ hub.name }}</span>
-        <span class="hub-state">{{ hub.state }}</span>
-        <span class="hub-url">{{ hub.url }}</span>
-      </div>
-      <div *ngIf="hubStates.length === 0" class="no-hubs">
-        Nessun hub configurato. Clicca "Connetti" per iniziare.
-      </div>
-    </div>
-  </section>
-
-  <!-- Connected Clients -->
-  <section class="clients-section" *ngIf="isConnected">
-    <h2>Client Connessi ({{ connectedClients.length }})</h2>
-    <div class="clients-list">
-      <div 
-        *ngFor="let client of connectedClients" 
-        class="client-item"
-        [class.is-me]="client.deviceId === identity?.clientId"
-      >
-        <span class="client-type">{{ client.deviceType === 'tablet' ? '📱' : '🖥️' }}</span>
-        <span class="client-name">{{ client.deviceName }}</span>
-        <span class="client-badge" *ngIf="client.deviceId === identity?.clientId">(Tu)</span>
-      </div>
-      <div *ngIf="connectedClients.length === 0" class="no-clients">
-        Nessun altro client connesso
-      </div>
-    </div>
-  </section>
-
-  <!-- Message Panel -->
-  <section class="message-panel" *ngIf="isConnected">
-    <h2>Messaggi</h2>
+  <!-- Main Content quando connesso -->
+  <div class="main-content" *ngIf="isConnected">
     
-    <div class="message-input">
-      <input 
-        type="text" 
-        [(ngModel)]="messageText" 
-        placeholder="Scrivi un messaggio..."
-        (keyup.enter)="sendMessage()"
-      />
-      <button class="btn btn-send" (click)="sendMessage()">Invia</button>
-    </div>
-
-    <div class="messages-list">
-      <div 
-        *ngFor="let msg of messages" 
-        class="message-item"
-        [class.is-mine]="msg.senderId === identity?.clientId"
-      >
-        <div class="message-header">
-          <span class="sender">{{ msg.senderName }}</span>
-          <span class="time">{{ formatTime(msg.timestamp) }}</span>
+    <!-- Messages Section (in alto) -->
+    <section class="messages-section">
+      <h2>💬 Messaggi</h2>
+      
+      <div class="messages-list">
+        <div 
+          *ngFor="let msg of messages" 
+          class="message-item"
+          [ngClass]="getMessageClass(msg)"
+        >
+          <div class="message-header">
+            <span class="message-sender">{{ msg.senderName }}</span>
+            <span class="message-privacy-icon" [title]="isMessagePrivate(msg) ? 'Messaggio privato' : 'Messaggio pubblico'">
+              {{ isMessagePrivate(msg) ? '🔒' : '📢' }}
+            </span>
+          </div>
+          <div class="message-body">{{ msg.message }}</div>
+          <div class="message-time">{{ formatTime(msg.timestamp) }}</div>
         </div>
-        <div class="message-body">{{ msg.message }}</div>
+        <div *ngIf="messages.length === 0" class="no-messages">
+          Nessun messaggio. Inizia a chattare!
+        </div>
       </div>
-      <div *ngIf="messages.length === 0" class="no-messages">
-        Nessun messaggio. Inizia a chattare!
-      </div>
-    </div>
 
-    <button class="btn btn-clear" (click)="clearMessages()" *ngIf="messages.length > 0">
-      Pulisci messaggi
-    </button>
-  </section>
+      <!-- Recipient Selector -->
+      <div class="recipient-selector" *ngIf="availableRecipients.length > 0">
+        <div class="recipient-label">Destinatario:</div>
+        <div class="recipient-buttons">
+          <button 
+            class="btn-recipient" 
+            [class.active]="selectedRecipientId === null"
+            (click)="selectRecipient(null)"
+          >
+            📢 Tutti
+          </button>
+          <button 
+            *ngFor="let recipient of availableRecipients"
+            class="btn-recipient"
+            [class.active]="selectedRecipientId === recipient.deviceId"
+            (click)="selectRecipient(recipient.deviceId)"
+          >
+            🔒 {{ recipient.deviceName }}
+          </button>
+        </div>
+      </div>
+
+      <div class="message-input">
+        <input 
+          type="text" 
+          [(ngModel)]="messageText" 
+          [placeholder]="selectedRecipientId ? 'Messaggio privato a ' + getRecipientName() : 'Scrivi un messaggio pubblico...'"
+          (keyup.enter)="sendMessage()"
+        />
+        <button class="btn btn-send" (click)="sendMessage()">Invia</button>
+      </div>
+
+      <button class="btn btn-clear" (click)="clearMessages()" *ngIf="messages.length > 0">
+        Pulisci messaggi
+      </button>
+    </section>
+
+    <!-- Bottom Section -->
+    <div class="bottom-section">
+      
+      <!-- Hub Status -->
+      <section class="hub-status">
+        <h3>📡 Stato Hub</h3>
+        <div class="hub-list">
+          <div 
+            *ngFor="let hub of hubStates" 
+            class="hub-item"
+            [class]="getStateClass(hub.state)"
+          >
+            <span class="hub-name">{{ hub.name }}</span>
+            <span class="hub-state">{{ hub.state }}</span>
+          </div>
+          <div *ngIf="hubStates.length === 0" class="no-hubs">
+            Nessun hub configurato
+          </div>
+        </div>
+      </section>
+
+      <!-- Connected Clients (Accordion) -->
+      <section class="clients-section">
+        <div class="accordion-header" (click)="toggleClientsAccordion()">
+          <h3>👥 Client Connessi ({{ connectedClients.length }})</h3>
+          <span class="accordion-icon">{{ clientsAccordionOpen ? '▼' : '▶' }}</span>
+        </div>
+        
+        <div class="clients-list" *ngIf="clientsAccordionOpen">
+          <div 
+            *ngFor="let client of connectedClients" 
+            class="client-item"
+            [class.is-me]="client.deviceId === identity?.clientId"
+          >
+            <span class="client-type">{{ client.deviceType === 'tablet' ? '📱' : '🖥️' }}</span>
+            <span class="client-name">{{ client.deviceName }}</span>
+            <span class="client-badge" *ngIf="client.deviceId === identity?.clientId">(Tu)</span>
+          </div>
+          <div *ngIf="connectedClients.length === 0" class="no-clients">
+            Nessun altro client connesso
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
 </div>

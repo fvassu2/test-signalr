@@ -61,6 +61,8 @@ export interface MessageData {
   timestamp: Date;
   /** Hub da cui proviene il messaggio */
   hubName?: string;
+  /** Se presente, il messaggio è privato e destinato a questo client */
+  targetClientId?: string;
 }
 
 export interface DeviceStatusUpdate {
