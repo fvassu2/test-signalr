@@ -18,8 +18,8 @@ import {
  */
 export const DEFAULT_HUB_CONFIGS: HubConfig[] = [
   { name: 'devices', url: 'http://localhost:5000/deviceHub', autoConnect: true },
+  { name: 'chat', url: 'http://localhost:5000/chatHub', autoConnect: true },
   // Aggiungi altri hub qui:
-  // { name: 'chat', url: 'http://localhost:5000/chatHub', autoConnect: false },
   // { name: 'notifications', url: 'http://localhost:5000/notificationHub', autoConnect: true },
 ];
 
