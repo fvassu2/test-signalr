@@ -1,56 +1,52 @@
 using Microsoft.AspNetCore.SignalR;
+using System.Collections.Concurrent;
 
 namespace SignalRBackend.Hubs;
 
 public class DeviceHub : Hub
 {
-    private static readonly Dictionary<string, DeviceInfo> ConnectedDevices = new();
+    // Use ConcurrentDictionary for thread-safety
+    // Map DeviceId -> ClientInfo (DeviceId is persistent, ConnectionId changes on reconnect)
+    private static readonly ConcurrentDictionary<string, ClientInfo> ConnectedClients = new();
     private static int _messageCounter = 0;
 
-    public override async Task OnConnectedAsync()
+    /// <summary>
+    /// Register a client with the hub. This should be called by the client after connecting.
+    /// </summary>
+    public async Task RegisterClient(ClientInfo clientInfo)
     {
-        var deviceId = Context.ConnectionId;
-        var deviceInfo = new DeviceInfo
-        {
-            DeviceId = deviceId,
-            ConnectedAt = DateTime.UtcNow,
-            DeviceName = $"Device-{ConnectedDevices.Count + 1}"
-        };
+        // Set the current ConnectionId
+        clientInfo.ConnectionId = Context.ConnectionId;
+        clientInfo.ConnectedAt = DateTime.UtcNow;
         
-        ConnectedDevices[deviceId] = deviceInfo;
+        // Add or update the client in the dictionary using DeviceId as key
+        ConnectedClients[clientInfo.DeviceId] = clientInfo;
         
-        // Notify all clients about new device connection
-        await Clients.All.SendAsync("DeviceConnected", deviceInfo);
+        // Notify all clients about new client connection
+        await Clients.All.SendAsync("ClientConnected", clientInfo);
         
-        // Send current connected devices list to the new client
-        await Clients.Caller.SendAsync("ConnectedDevicesList", ConnectedDevices.Values);
-        
-        await base.OnConnectedAsync();
+        // Send current connected clients list to the caller
+        await Clients.Caller.SendAsync("ConnectedClientsList", ConnectedClients.Values.ToArray());
     }
 
-    public override async Task OnDisconnectedAsync(Exception? exception)
+    /// <summary>
+    /// Get all connected clients and send to the caller
+    /// </summary>
+    public async Task GetConnectedClients()
     {
-        var deviceId = Context.ConnectionId;
-        
-        if (ConnectedDevices.TryGetValue(deviceId, out var deviceInfo))
-        {
-            ConnectedDevices.Remove(deviceId);
-            
-            // Notify all clients about device disconnection
-            await Clients.All.SendAsync("DeviceDisconnected", deviceInfo);
-        }
-        
-        await base.OnDisconnectedAsync(exception);
+        await Clients.Caller.SendAsync("ConnectedClientsList", ConnectedClients.Values.ToArray());
     }
 
-    public async Task SendMessage(string deviceName, string message)
+    /// <summary>
+    /// Send a message to all connected clients
+    /// </summary>
+    public async Task SendMessage(string senderId, string senderName, string message)
     {
-        _messageCounter++;
         var messageData = new MessageData
         {
-            Id = _messageCounter,
-            DeviceId = Context.ConnectionId,
-            DeviceName = deviceName,
+            Id = Interlocked.Increment(ref _messageCounter),
+            SenderId = senderId,
+            SenderName = senderName,
             Message = message,
             Timestamp = DateTime.UtcNow
         };
@@ -59,53 +55,110 @@ public class DeviceHub : Hub
         await Clients.All.SendAsync("ReceiveMessage", messageData);
     }
 
-    public async Task SendMessageToDevice(string targetDeviceId, string message)
+    /// <summary>
+    /// Send a message to a specific client using their DeviceId
+    /// </summary>
+    public async Task SendMessageToClient(string targetDeviceId, string message)
     {
-        _messageCounter++;
-        var messageData = new MessageData
+        // Find the client by DeviceId to get their current ConnectionId
+        if (ConnectedClients.TryGetValue(targetDeviceId, out var targetClient))
         {
-            Id = _messageCounter,
-            DeviceId = Context.ConnectionId,
-            DeviceName = ConnectedDevices.GetValueOrDefault(Context.ConnectionId)?.DeviceName ?? "Unknown",
-            Message = message,
-            Timestamp = DateTime.UtcNow
-        };
-        
-        // Send message to specific device
-        await Clients.Client(targetDeviceId).SendAsync("ReceiveMessage", messageData);
+            // Get sender info
+            var senderClient = ConnectedClients.Values.FirstOrDefault(c => c.ConnectionId == Context.ConnectionId);
+            
+            var messageData = new MessageData
+            {
+                Id = Interlocked.Increment(ref _messageCounter),
+                SenderId = senderClient?.DeviceId ?? "Unknown",
+                SenderName = senderClient?.DeviceName ?? "Unknown",
+                Message = message,
+                Timestamp = DateTime.UtcNow
+            };
+            
+            // Send message to specific client using their ConnectionId
+            await Clients.Client(targetClient.ConnectionId).SendAsync("ReceiveMessage", messageData);
+        }
     }
 
-    public async Task BroadcastDeviceStatus(string deviceName, string status)
+    /// <summary>
+    /// Handle client disconnection
+    /// </summary>
+    public override async Task OnDisconnectedAsync(Exception? exception)
     {
-        var statusData = new
-        {
-            DeviceId = Context.ConnectionId,
-            DeviceName = deviceName,
-            Status = status,
-            Timestamp = DateTime.UtcNow
-        };
+        // Find the client by ConnectionId
+        var disconnectedClient = ConnectedClients.Values.FirstOrDefault(c => c.ConnectionId == Context.ConnectionId);
         
-        await Clients.All.SendAsync("DeviceStatusUpdate", statusData);
-    }
-
-    public Task<IEnumerable<DeviceInfo>> GetConnectedDevices()
-    {
-        return Task.FromResult(ConnectedDevices.Values.AsEnumerable());
+        if (disconnectedClient != null)
+        {
+            // Remove the client from the dictionary
+            ConnectedClients.TryRemove(disconnectedClient.DeviceId, out _);
+            
+            // Notify all clients about client disconnection
+            await Clients.All.SendAsync("ClientDisconnected", disconnectedClient);
+        }
+        
+        await base.OnDisconnectedAsync(exception);
     }
 }
 
-public class DeviceInfo
+/// <summary>
+/// Client information model
+/// </summary>
+public class ClientInfo
 {
+    /// <summary>
+    /// Persistent device identifier (doesn't change on reconnect)
+    /// </summary>
     public string DeviceId { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Display name for the device
+    /// </summary>
     public string DeviceName { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Type of device: "tablet" or "manager"
+    /// </summary>
+    public string DeviceType { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// When the client connected
+    /// </summary>
     public DateTime ConnectedAt { get; set; }
+    
+    /// <summary>
+    /// Current SignalR connection ID (changes on reconnect)
+    /// </summary>
+    public string ConnectionId { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// Message data model
+/// </summary>
 public class MessageData
 {
+    /// <summary>
+    /// Incremental message ID
+    /// </summary>
     public int Id { get; set; }
-    public string DeviceId { get; set; } = string.Empty;
-    public string DeviceName { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Sender's device ID
+    /// </summary>
+    public string SenderId { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Sender's display name
+    /// </summary>
+    public string SenderName { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Message content
+    /// </summary>
     public string Message { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// When the message was sent
+    /// </summary>
     public DateTime Timestamp { get; set; }
 }

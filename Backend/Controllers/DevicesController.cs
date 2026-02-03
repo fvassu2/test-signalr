@@ -25,8 +25,8 @@ public class DevicesController : ControllerBase
         await _hubContext.Clients.All.SendAsync("ReceiveMessage", new
         {
             Id = 0,
-            DeviceId = "API",
-            DeviceName = "REST API",
+            SenderId = "API",
+            SenderName = "REST API",
             Message = request.Message,
             Timestamp = DateTime.UtcNow
         });
