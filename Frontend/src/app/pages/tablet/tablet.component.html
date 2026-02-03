@@ -1,0 +1,118 @@
+<div class="tablet-container">
+  <header class="tablet-header">
+    <h1>📱 Tablet Client</h1>
+    <p class="client-id" *ngIf="identity">
+      ID: <code>{{ identity.clientId }}</code>
+    </p>
+  </header>
+
+  <!-- Connection Panel -->
+  <section class="connection-panel">
+    <div class="input-group">
+      <label for="clientName">Nome Client:</label>
+      <input 
+        type="text" 
+        id="clientName" 
+        [(ngModel)]="clientName" 
+        [disabled]="isConnected"
+        placeholder="Es: Tablet-Cucina"
+      />
+    </div>
+
+    <div class="button-group">
+      <button 
+        class="btn btn-connect" 
+        (click)="connect()" 
+        [disabled]="isConnected || isConnecting"
+      >
+        {{ isConnecting ? 'Connessione...' : 'Connetti' }}
+      </button>
+      
+      <button 
+        class="btn btn-disconnect" 
+        (click)="disconnect()" 
+        [disabled]="!isConnected"
+      >
+        Disconnetti
+      </button>
+    </div>
+
+    <div class="error-message" *ngIf="error">
+      ⚠️ {{ error }}
+    </div>
+  </section>
+
+  <!-- Hub Status -->
+  <section class="hub-status">
+    <h2>Stato Hub</h2>
+    <div class="hub-list">
+      <div 
+        *ngFor="let hub of hubStates" 
+        class="hub-item"
+        [class]="getStateClass(hub.state)"
+      >
+        <span class="hub-name">{{ hub.name }}</span>
+        <span class="hub-state">{{ hub.state }}</span>
+        <span class="hub-url">{{ hub.url }}</span>
+      </div>
+      <div *ngIf="hubStates.length === 0" class="no-hubs">
+        Nessun hub configurato. Clicca "Connetti" per iniziare.
+      </div>
+    </div>
+  </section>
+
+  <!-- Connected Clients -->
+  <section class="clients-section" *ngIf="isConnected">
+    <h2>Client Connessi ({{ connectedClients.length }})</h2>
+    <div class="clients-list">
+      <div 
+        *ngFor="let client of connectedClients" 
+        class="client-item"
+        [class.is-me]="client.deviceId === identity?.clientId"
+      >
+        <span class="client-type">{{ client.deviceType === 'tablet' ? '📱' : '🖥️' }}</span>
+        <span class="client-name">{{ client.deviceName }}</span>
+        <span class="client-badge" *ngIf="client.deviceId === identity?.clientId">(Tu)</span>
+      </div>
+      <div *ngIf="connectedClients.length === 0" class="no-clients">
+        Nessun altro client connesso
+      </div>
+    </div>
+  </section>
+
+  <!-- Message Panel -->
+  <section class="message-panel" *ngIf="isConnected">
+    <h2>Messaggi</h2>
+    
+    <div class="message-input">
+      <input 
+        type="text" 
+        [(ngModel)]="messageText" 
+        placeholder="Scrivi un messaggio..."
+        (keyup.enter)="sendMessage()"
+      />
+      <button class="btn btn-send" (click)="sendMessage()">Invia</button>
+    </div>
+
+    <div class="messages-list">
+      <div 
+        *ngFor="let msg of messages" 
+        class="message-item"
+        [class.is-mine]="msg.senderId === identity?.clientId"
+      >
+        <div class="message-header">
+          <span class="sender">{{ msg.senderName }}</span>
+          <span class="time">{{ formatTime(msg.timestamp) }}</span>
+        </div>
+        <div class="message-body">{{ msg.message }}</div>
+      </div>
+      <div *ngIf="messages.length === 0" class="no-messages">
+        Nessun messaggio. Inizia a chattare!
+      </div>
+    </div>
+
+    <button class="btn btn-clear" (click)="clearMessages()" *ngIf="messages.length > 0">
+      Pulisci messaggi
+    </button>
+  </section>
+</div>

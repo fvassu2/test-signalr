@@ -41,6 +41,7 @@ app.MapControllers();
 
 // Map SignalR Hub
 app.MapHub<DeviceHub>("/deviceHub");
+app.MapHub<ChatHub>("/chatHub");
 
 // Health check endpoint
 app.MapGet("/api/health", () =>

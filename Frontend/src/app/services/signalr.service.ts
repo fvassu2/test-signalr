@@ -1,159 +1,335 @@
-import { Injectable } from '@angular/core';
+import { Injectable, signal, computed } from '@angular/core';
 import * as signalR from '@microsoft/signalr';
 import { HubConnection, HubConnectionState } from '@microsoft/signalr';
-import { BehaviorSubject, Observable } from 'rxjs';
-import { DeviceInfo, MessageData, DeviceStatusUpdate, Notification } from '../models/signalr.models';
+import {
+  HubConfig,
+  ConnectionState,
+  HubConnectionInfo,
+  DeviceInfo,
+  MessageData,
+  DeviceStatusUpdate,
+  Notification,
+  ClientIdentity
+} from '../models/signalr.models';
 
+/**
+ * Configurazione di default degli Hub disponibili.
+ * Puoi aggiungerne altri qui o passarli dinamicamente.
+ */
+export const DEFAULT_HUB_CONFIGS: HubConfig[] = [
+  { name: 'devices', url: 'http://localhost:5000/deviceHub', autoConnect: true },
+  // Aggiungi altri hub qui:
+  // { name: 'chat', url: 'http://localhost:5000/chatHub', autoConnect: false },
+  // { name: 'notifications', url: 'http://localhost:5000/notificationHub', autoConnect: true },
+];
+
+/**
+ * SignalRService - Gestisce connessioni multiple a diversi Hub SignalR.
+ * 
+ * USO:
+ * 1. Inietta il servizio nel componente
+ * 2. Chiama connect() passando l'identità del client
+ * 3. Usa i signals per leggere lo stato in modo reattivo
+ * 4. Chiama i metodi per inviare messaggi
+ */
 @Injectable({
   providedIn: 'root'
 })
 export class SignalRService {
-  private hubUrl = 'http://localhost:5000/deviceHub';
-  private hubConnection: HubConnection | null = null;
-  
-  // Observables for real-time updates
-  private connectedDevicesSubject = new BehaviorSubject<DeviceInfo[]>([]);
-  public connectedDevices$ = this.connectedDevicesSubject.asObservable();
-  
-  private messagesSubject = new BehaviorSubject<MessageData[]>([]);
-  public messages$ = this.messagesSubject.asObservable();
-  
-  private connectionStateSubject = new BehaviorSubject<string>('Disconnected');
-  public connectionState$ = this.connectionStateSubject.asObservable();
-  
-  private notificationsSubject = new BehaviorSubject<Notification | null>(null);
-  public notifications$ = this.notificationsSubject.asObservable();
-  
-  private deviceStatusSubject = new BehaviorSubject<DeviceStatusUpdate | null>(null);
-  public deviceStatus$ = this.deviceStatusSubject.asObservable();
+  /** Mappa delle connessioni attive: hubName -> HubConnection */
+  private connections = new Map<string, HubConnection>();
+
+  /** Configurazione degli hub */
+  private hubConfigs: HubConfig[] = [];
+
+  /** Identità del client corrente */
+  private clientIdentity: ClientIdentity | null = null;
+
+  // ============================================
+  // SIGNALS - Stato reattivo
+  // ============================================
+
+  /** Stato di connessione per ogni hub */
+  public hubStates = signal<Map<string, HubConnectionInfo>>(new Map());
+
+  /** Lista dei client/device connessi (ricevuta dal server) */
+  public connectedClients = signal<DeviceInfo[]>([]);
+
+  /** Messaggi ricevuti */
+  public messages = signal<MessageData[]>([]);
+
+  /** Ultima notifica ricevuta */
+  public notification = signal<Notification | null>(null);
+
+  /** Ultimo aggiornamento di stato di un device */
+  public deviceStatus = signal<DeviceStatusUpdate | null>(null);
+
+  // ============================================
+  // COMPUTED SIGNALS
+  // ============================================
+
+  /** True se almeno un hub è connesso */
+  public isAnyConnected = computed(() => {
+    const states = this.hubStates();
+    return Array.from(states.values()).some(h => h.state === 'Connected');
+  });
+
+  /** True se tutti gli hub configurati sono connessi */
+  public isAllConnected = computed(() => {
+    const states = this.hubStates();
+    if (states.size === 0) return false;
+    return Array.from(states.values()).every(h => h.state === 'Connected');
+  });
+
+  /** Lista degli hub con errori */
+  public hubsWithErrors = computed(() => {
+    const states = this.hubStates();
+    return Array.from(states.values()).filter(h => h.state === 'Error');
+  });
 
   constructor() { }
 
-  public async startConnection(deviceName: string = 'Device'): Promise<void> {
+  // ============================================
+  // PUBLIC METHODS
+  // ============================================
+
+  /**
+   * Inizializza e connette agli hub configurati.
+   * @param identity - Identità del client (tablet/manager)
+   * @param configs - Configurazioni hub (opzionale, usa default se non specificato)
+   */
+  public async connect(identity: ClientIdentity, configs?: HubConfig[]): Promise<void> {
+    this.clientIdentity = identity;
+    this.hubConfigs = configs ?? DEFAULT_HUB_CONFIGS;
+
+    // Inizializza gli stati
+    const initialStates = new Map<string, HubConnectionInfo>();
+    for (const config of this.hubConfigs) {
+      initialStates.set(config.name, {
+        name: config.name,
+        url: config.url,
+        state: 'Disconnected'
+      });
+    }
+    this.hubStates.set(initialStates);
+
+    // Connetti agli hub con autoConnect = true
+    const autoConnectHubs = this.hubConfigs.filter(c => c.autoConnect !== false);
+    await Promise.all(autoConnectHubs.map(config => this.connectToHub(config.name)));
+  }
+
+  /**
+   * Connette a un hub specifico.
+   */
+  public async connectToHub(hubName: string): Promise<void> {
+    const config = this.hubConfigs.find(c => c.name === hubName);
+    if (!config) {
+      console.error(`Hub config not found: ${hubName}`);
+      return;
+    }
+
+    if (this.connections.has(hubName)) {
+      console.warn(`Already connected to hub: ${hubName}`);
+      return;
+    }
+
+    this.updateHubState(hubName, 'Connecting');
+
     try {
-      this.hubConnection = new signalR.HubConnectionBuilder()
-        .withUrl(this.hubUrl)
+      const connection = new signalR.HubConnectionBuilder()
+        .withUrl(config.url)
         .withAutomaticReconnect()
         .configureLogging(signalR.LogLevel.Information)
         .build();
 
-      this.setupEventHandlers();
-      
-      await this.hubConnection.start();
-      console.log('SignalR connection established');
-      this.connectionStateSubject.next('Connected');
-      
-      // Broadcast initial status
-      await this.broadcastDeviceStatus(deviceName, 'Online');
+      this.setupEventHandlers(connection, hubName);
+      this.connections.set(hubName, connection);
+
+      await connection.start();
+      console.log(`[${hubName}] Connected`);
+      this.updateHubState(hubName, 'Connected');
+
+      // Registra questo client sul server
+      if (this.clientIdentity) {
+        await this.registerClient(hubName);
+      }
     } catch (error) {
-      console.error('Error while starting SignalR connection:', error);
-      this.connectionStateSubject.next('Error');
+      console.error(`[${hubName}] Connection error:`, error);
+      this.updateHubState(hubName, 'Error', String(error));
       throw error;
     }
   }
 
-  private setupEventHandlers(): void {
-    if (!this.hubConnection) return;
+  /**
+   * Disconnette da un hub specifico.
+   */
+  public async disconnectFromHub(hubName: string): Promise<void> {
+    const connection = this.connections.get(hubName);
+    if (connection) {
+      await connection.stop();
+      this.connections.delete(hubName);
+      this.updateHubState(hubName, 'Disconnected');
+      console.log(`[${hubName}] Disconnected`);
+    }
+  }
 
-    // Handle device connected
-    this.hubConnection.on('DeviceConnected', (deviceInfo: DeviceInfo) => {
-      console.log('Device connected:', deviceInfo);
-      const currentDevices = this.connectedDevicesSubject.value;
-      this.connectedDevicesSubject.next([...currentDevices, deviceInfo]);
+  /**
+   * Disconnette da tutti gli hub.
+   */
+  public async disconnectAll(): Promise<void> {
+    const hubNames = Array.from(this.connections.keys());
+    await Promise.all(hubNames.map(name => this.disconnectFromHub(name)));
+  }
+
+  /**
+   * Invia un messaggio broadcast a tutti i client connessi a un hub.
+   */
+  public async sendMessage(hubName: string, message: string): Promise<void> {
+    const connection = this.connections.get(hubName);
+    if (!connection || connection.state !== HubConnectionState.Connected) {
+      console.error(`Cannot send message: not connected to ${hubName}`);
+      return;
+    }
+
+    if (!this.clientIdentity) {
+      console.error('Cannot send message: client identity not set');
+      return;
+    }
+
+    await connection.invoke('SendMessage', this.clientIdentity.clientId, this.clientIdentity.clientName, message);
+  }
+
+  /**
+   * Invia un messaggio a un client specifico.
+   */
+  public async sendMessageToClient(hubName: string, targetClientId: string, message: string): Promise<void> {
+    const connection = this.connections.get(hubName);
+    if (!connection || connection.state !== HubConnectionState.Connected) {
+      console.error(`Cannot send message: not connected to ${hubName}`);
+      return;
+    }
+
+    await connection.invoke('SendMessageToClient', targetClientId, message);
+  }
+
+  /**
+   * Richiede la lista dei client connessi.
+   */
+  public async requestConnectedClients(hubName: string): Promise<void> {
+    const connection = this.connections.get(hubName);
+    if (connection?.state === HubConnectionState.Connected) {
+      await connection.invoke('GetConnectedClients');
+    }
+  }
+
+  /**
+   * Pulisce i messaggi.
+   */
+  public clearMessages(): void {
+    this.messages.set([]);
+  }
+
+  /**
+   * Ottiene la connessione a un hub (per usi avanzati).
+   */
+  public getConnection(hubName: string): HubConnection | undefined {
+    return this.connections.get(hubName);
+  }
+
+  // ============================================
+  // PRIVATE METHODS
+  // ============================================
+
+  private async registerClient(hubName: string): Promise<void> {
+    const connection = this.connections.get(hubName);
+    if (!connection || !this.clientIdentity) return;
+
+    try {
+      await connection.invoke('RegisterClient', {
+        deviceId: this.clientIdentity.clientId,
+        deviceName: this.clientIdentity.clientName,
+        deviceType: this.clientIdentity.clientType,
+        connectedAt: new Date()
+      });
+      console.log(`[${hubName}] Client registered:`, this.clientIdentity.clientName);
+    } catch (error) {
+      console.error(`[${hubName}] Failed to register client:`, error);
+    }
+  }
+
+  private updateHubState(hubName: string, state: ConnectionState, error?: string): void {
+    this.hubStates.update(states => {
+      const newStates = new Map(states);
+      const current = newStates.get(hubName);
+      if (current) {
+        newStates.set(hubName, { ...current, state, error });
+      }
+      return newStates;
+    });
+  }
+
+  private setupEventHandlers(connection: HubConnection, hubName: string): void {
+    // Client connesso
+    connection.on('ClientConnected', (client: DeviceInfo) => {
+      console.log(`[${hubName}] Client connected:`, client);
+      this.connectedClients.update(clients => {
+        // Evita duplicati
+        if (clients.some(c => c.deviceId === client.deviceId)) {
+          return clients;
+        }
+        return [...clients, client];
+      });
     });
 
-    // Handle device disconnected
-    this.hubConnection.on('DeviceDisconnected', (deviceInfo: DeviceInfo) => {
-      console.log('Device disconnected:', deviceInfo);
-      const currentDevices = this.connectedDevicesSubject.value;
-      this.connectedDevicesSubject.next(
-        currentDevices.filter(d => d.deviceId !== deviceInfo.deviceId)
+    // Client disconnesso
+    connection.on('ClientDisconnected', (client: DeviceInfo) => {
+      console.log(`[${hubName}] Client disconnected:`, client);
+      this.connectedClients.update(clients =>
+        clients.filter(c => c.deviceId !== client.deviceId)
       );
     });
 
-    // Handle connected devices list
-    this.hubConnection.on('ConnectedDevicesList', (devices: DeviceInfo[]) => {
-      console.log('Connected devices list:', devices);
-      this.connectedDevicesSubject.next(devices);
+    // Lista client connessi (risposta a GetConnectedClients)
+    connection.on('ConnectedClientsList', (clients: DeviceInfo[]) => {
+      console.log(`[${hubName}] Connected clients list:`, clients);
+      this.connectedClients.set(clients);
     });
 
-    // Handle received messages
-    this.hubConnection.on('ReceiveMessage', (message: MessageData) => {
-      console.log('Message received:', message);
-      const currentMessages = this.messagesSubject.value;
-      this.messagesSubject.next([...currentMessages, message]);
+    // Messaggio ricevuto
+    connection.on('ReceiveMessage', (message: MessageData) => {
+      console.log(`[${hubName}] Message received:`, message);
+      this.messages.update(msgs => [...msgs, { ...message, hubName }]);
     });
 
-    // Handle device status updates
-    this.hubConnection.on('DeviceStatusUpdate', (statusUpdate: DeviceStatusUpdate) => {
-      console.log('Device status update:', statusUpdate);
-      this.deviceStatusSubject.next(statusUpdate);
+    // Aggiornamento stato device
+    connection.on('DeviceStatusUpdate', (status: DeviceStatusUpdate) => {
+      console.log(`[${hubName}] Device status update:`, status);
+      this.deviceStatus.set(status);
     });
 
-    // Handle notifications
-    this.hubConnection.on('ReceiveNotification', (notification: Notification) => {
-      console.log('Notification received:', notification);
-      this.notificationsSubject.next(notification);
+    // Notifica
+    connection.on('ReceiveNotification', (notif: Notification) => {
+      console.log(`[${hubName}] Notification:`, notif);
+      this.notification.set(notif);
     });
 
-    // Handle connection state changes
-    this.hubConnection.onreconnecting(() => {
-      console.log('SignalR reconnecting...');
-      this.connectionStateSubject.next('Reconnecting');
+    // Gestione riconnessione
+    connection.onreconnecting(() => {
+      console.log(`[${hubName}] Reconnecting...`);
+      this.updateHubState(hubName, 'Reconnecting');
     });
 
-    this.hubConnection.onreconnected(() => {
-      console.log('SignalR reconnected');
-      this.connectionStateSubject.next('Connected');
+    connection.onreconnected(() => {
+      console.log(`[${hubName}] Reconnected`);
+      this.updateHubState(hubName, 'Connected');
+      // Ri-registra il client
+      this.registerClient(hubName);
     });
 
-    this.hubConnection.onclose(() => {
-      console.log('SignalR connection closed');
-      this.connectionStateSubject.next('Disconnected');
+    connection.onclose(() => {
+      console.log(`[${hubName}] Connection closed`);
+      this.updateHubState(hubName, 'Disconnected');
+      this.connections.delete(hubName);
     });
-  }
-
-  public async sendMessage(deviceName: string, message: string): Promise<void> {
-    if (this.hubConnection?.state === HubConnectionState.Connected) {
-      await this.hubConnection.invoke('SendMessage', deviceName, message);
-    } else {
-      console.error('Cannot send message: Not connected to hub');
-    }
-  }
-
-  public async sendMessageToDevice(targetDeviceId: string, message: string): Promise<void> {
-    if (this.hubConnection?.state === HubConnectionState.Connected) {
-      await this.hubConnection.invoke('SendMessageToDevice', targetDeviceId, message);
-    } else {
-      console.error('Cannot send message: Not connected to hub');
-    }
-  }
-
-  public async broadcastDeviceStatus(deviceName: string, status: string): Promise<void> {
-    if (this.hubConnection?.state === HubConnectionState.Connected) {
-      await this.hubConnection.invoke('BroadcastDeviceStatus', deviceName, status);
-    } else {
-      console.error('Cannot broadcast status: Not connected to hub');
-    }
-  }
-
-  public async stopConnection(): Promise<void> {
-    if (this.hubConnection) {
-      await this.hubConnection.stop();
-      this.connectionStateSubject.next('Disconnected');
-      console.log('SignalR connection stopped');
-    }
-  }
-
-  public isConnected(): boolean {
-    return this.hubConnection?.state === HubConnectionState.Connected;
-  }
-
-  public getConnectionState(): string {
-    return this.hubConnection?.state || 'Disconnected';
-  }
-
-  public clearMessages(): void {
-    this.messagesSubject.next([]);
   }
 }
