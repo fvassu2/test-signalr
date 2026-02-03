@@ -29,4 +29,11 @@ public class MessageData
     /// When the message was sent
     /// </summary>
     public DateTime Timestamp { get; set; }
+    
+    /// <summary>
+    /// Target client ID for private messages.
+    /// Null for broadcast messages (visible to all clients).
+    /// When set, the message is private and only visible to sender and target.
+    /// </summary>
+    public string? TargetClientId { get; set; }
 }

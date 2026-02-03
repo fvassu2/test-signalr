@@ -67,7 +67,8 @@ public abstract class BaseHub : Hub
             SenderId = senderId,
             SenderName = senderName,
             Message = message,
-            Timestamp = DateTime.UtcNow
+            Timestamp = DateTime.UtcNow,
+            TargetClientId = null // Null indicates broadcast message (visible to all)
         };
         
         // Broadcast message to all connected clients
@@ -95,11 +96,13 @@ public abstract class BaseHub : Hub
                 SenderId = senderClient?.DeviceId ?? "Unknown",
                 SenderName = senderClient?.DeviceName ?? "Unknown",
                 Message = message,
-                Timestamp = DateTime.UtcNow
+                Timestamp = DateTime.UtcNow,
+                TargetClientId = targetDeviceId // Set target ID to indicate private message
             };
             
-            // Send message to specific client using their ConnectionId
-            await Clients.Client(targetClient.ConnectionId).SendAsync("ReceiveMessage", messageData);
+            // Send message to both sender and recipient (private message visible to both parties)
+            await Clients.Clients(Context.ConnectionId, targetClient.ConnectionId)
+                .SendAsync("ReceiveMessage", messageData);
             
             OnDirectMessageSent(messageData, targetDeviceId);
         }
