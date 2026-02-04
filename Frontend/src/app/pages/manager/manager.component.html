@@ -1,4 +1,13 @@
 <div class="manager-container">
+  <!-- Toast Notification -->
+  <div class="toast" [class.show]="toastVisible">
+    <div class="toast-content">
+      <span class="toast-icon">🔔</span>
+      <span class="toast-message">{{ toastMessage }}</span>
+      <button class="toast-close" (click)="hideToast()">✕</button>
+    </div>
+  </div>
+
   <header class="manager-header">
     <h1>🖥️ Manager Dashboard</h1>
     <p class="subtitle">Monitora e gestisci tutti i client connessi in tempo reale</p>

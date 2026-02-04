@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, effect, ChangeDetectorRef, untracked } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SignalRService } from '../../services/signalr.service';
@@ -15,6 +15,7 @@ import { DeviceInfo, HubConnectionInfo, MessageData } from '../../models/signalr
 export class ManagerComponent implements OnInit, OnDestroy {
     private signalRService = inject(SignalRService);
     private clientIdentityService = inject(ClientIdentityService);
+    private cdr = inject(ChangeDetectorRef);
 
     // Form inputs
     broadcastMessage = '';
@@ -24,6 +25,9 @@ export class ManagerComponent implements OnInit, OnDestroy {
     // State
     isConnecting = false;
     error: string | null = null;
+    toastVisible = false;
+    toastMessage = '';
+    private toastTimeout?: number;
 
     // Getters
     get identity() {
@@ -54,8 +58,29 @@ export class ManagerComponent implements OnInit, OnDestroy {
         return this.signalRService.messages();
     }
 
-    get lastNotification() {
-        return this.signalRService.notification();
+    constructor() {
+        // Effect per mostrare toast quando arriva una notifica
+        effect(() => {
+            const notification = this.signalRService.notification();
+            if (notification) {
+                // Usa untracked per evitare che l'effect causi change detection issues
+                untracked(() => {
+                    const message = notification.title ? `${notification.title}: ${notification.message}` : notification.message;
+                    this.toastMessage = message;
+                    this.toastVisible = true;
+                    this.cdr.detectChanges();
+
+                    // Auto-hide dopo 4 secondi
+                    if (this.toastTimeout) {
+                        clearTimeout(this.toastTimeout);
+                    }
+                    this.toastTimeout = window.setTimeout(() => {
+                        this.hideToast();
+                        this.cdr.detectChanges();
+                    }, 4000);
+                });
+            }
+        });
     }
 
     ngOnInit(): void {
@@ -132,6 +157,28 @@ export class ManagerComponent implements OnInit, OnDestroy {
 
     isMessagePrivate(message: MessageData): boolean {
         return !!message.targetClientId;
+    }
+
+    showToast(message: string): void {
+        console.log('showToast called with:', message);
+        this.toastMessage = message;
+        this.toastVisible = true;
+        console.log('Toast state:', { toastMessage: this.toastMessage, toastVisible: this.toastVisible });
+
+        // Auto-hide dopo 4 secondi
+        if (this.toastTimeout) {
+            clearTimeout(this.toastTimeout);
+        }
+        this.toastTimeout = window.setTimeout(() => {
+            this.hideToast();
+        }, 4000);
+    }
+
+    hideToast(): void {
+        this.toastVisible = false;
+        if (this.toastTimeout) {
+            clearTimeout(this.toastTimeout);
+        }
     }
 
     getStateClass(state: string): string {

@@ -330,7 +330,8 @@ export class SignalRService {
     // Notifica
     connection.on('ReceiveNotification', (notif: Notification) => {
       console.log(`[${hubName}] Notification:`, notif);
-      this.notification.set(notif);
+      // Forza l'aggiornamento creando sempre un nuovo oggetto
+      this.notification.set({ ...notif, timestamp: new Date(notif.timestamp) });
     });
 
     // Gestione riconnessione

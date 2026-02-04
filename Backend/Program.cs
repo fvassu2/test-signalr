@@ -1,3 +1,4 @@
+﻿using Scalar.AspNetCore;
 using SignalRBackend.Hubs;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -27,6 +28,7 @@ var app = builder.Build();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
+    app.MapScalarApiReference(); // ✅ Aggiungi questa riga
 }
 
 // Comment out HTTPS redirection for development to allow HTTP connections

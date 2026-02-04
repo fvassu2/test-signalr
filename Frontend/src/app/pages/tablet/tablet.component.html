@@ -1,4 +1,13 @@
 <div class="tablet-container">
+  <!-- Toast Notification -->
+  <div class="toast" [class.show]="toastVisible">
+    <div class="toast-content">
+      <span class="toast-icon">🔔</span>
+      <span class="toast-message">{{ toastMessage }}</span>
+      <button class="toast-close" (click)="hideToast()">✕</button>
+    </div>
+  </div>
+
   <header class="tablet-header">
     <h1>📱 Tablet Client</h1>
     <!-- Pulsante disconnect in alto a destra quando connesso -->

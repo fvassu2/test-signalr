@@ -21,7 +21,7 @@ public class DevicesController : ControllerBase
     public async Task<IActionResult> BroadcastMessage([FromBody] BroadcastRequest request)
     {
         _logger.LogInformation("Broadcasting message from API: {Message}", request.Message);
-        
+
         await _hubContext.Clients.All.SendAsync("ReceiveMessage", new
         {
             Id = 0,
@@ -30,7 +30,7 @@ public class DevicesController : ControllerBase
             Message = request.Message,
             Timestamp = DateTime.UtcNow
         });
-        
+
         return Ok(new { Success = true, Message = "Message broadcasted successfully" });
     }
 
@@ -38,14 +38,14 @@ public class DevicesController : ControllerBase
     public async Task<IActionResult> NotifyAllDevices([FromBody] NotificationRequest request)
     {
         _logger.LogInformation("Sending notification: {Title}", request.Title);
-        
+
         await _hubContext.Clients.All.SendAsync("ReceiveNotification", new
         {
             Title = request.Title,
             Message = request.Message,
             Timestamp = DateTime.UtcNow
         });
-        
+
         return Ok(new { Success = true, Message = "Notification sent successfully" });
     }
 

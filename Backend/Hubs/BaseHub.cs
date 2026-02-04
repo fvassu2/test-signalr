@@ -16,7 +16,7 @@ public abstract class BaseHub : Hub
     /// Each derived hub has its own client collection.
     /// </summary>
     protected abstract ConcurrentDictionary<string, ClientInfo> ConnectedClients { get; }
-    
+
     /// <summary>
     /// Message counter for this hub instance.
     /// Each derived hub manages its own counter.
@@ -32,16 +32,16 @@ public abstract class BaseHub : Hub
         // Set the current ConnectionId
         clientInfo.ConnectionId = Context.ConnectionId;
         clientInfo.ConnectedAt = DateTime.UtcNow;
-        
+
         // Add or update the client in the dictionary using DeviceId as key
         ConnectedClients[clientInfo.DeviceId] = clientInfo;
-        
+
         // Notify all clients about new client connection
         await Clients.All.SendAsync("ClientConnected", clientInfo);
-        
+
         // Send current connected clients list to the caller
         await Clients.Caller.SendAsync("ConnectedClientsList", ConnectedClients.Values.ToArray());
-        
+
         OnClientRegistered(clientInfo);
     }
 
@@ -70,10 +70,10 @@ public abstract class BaseHub : Hub
             Timestamp = DateTime.UtcNow,
             TargetClientId = null // Null indicates broadcast message (visible to all)
         };
-        
+
         // Broadcast message to all connected clients
         await Clients.All.SendAsync("ReceiveMessage", messageData);
-        
+
         OnMessageSent(messageData);
     }
 
@@ -89,7 +89,7 @@ public abstract class BaseHub : Hub
         {
             // Get sender info
             var senderClient = ConnectedClients.Values.FirstOrDefault(c => c.ConnectionId == Context.ConnectionId);
-            
+
             var messageData = new MessageData
             {
                 Id = Interlocked.Increment(ref GetMessageCounterRef()),
@@ -99,11 +99,11 @@ public abstract class BaseHub : Hub
                 Timestamp = DateTime.UtcNow,
                 TargetClientId = targetDeviceId // Set target ID to indicate private message
             };
-            
+
             // Send message to both sender and recipient (private message visible to both parties)
             await Clients.Clients(Context.ConnectionId, targetClient.ConnectionId)
                 .SendAsync("ReceiveMessage", messageData);
-            
+
             OnDirectMessageSent(messageData, targetDeviceId);
         }
     }
@@ -115,18 +115,18 @@ public abstract class BaseHub : Hub
     {
         // Find the client by ConnectionId
         var disconnectedClient = ConnectedClients.Values.FirstOrDefault(c => c.ConnectionId == Context.ConnectionId);
-        
+
         if (disconnectedClient != null)
         {
             // Remove the client from the dictionary
             ConnectedClients.TryRemove(disconnectedClient.DeviceId, out _);
-            
+
             // Notify all clients about client disconnection
             await Clients.All.SendAsync("ClientDisconnected", disconnectedClient);
-            
+
             OnClientDisconnected(disconnectedClient);
         }
-        
+
         await base.OnDisconnectedAsync(exception);
     }
 
