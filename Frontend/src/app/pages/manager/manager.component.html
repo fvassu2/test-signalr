@@ -1,0 +1,169 @@
+<div class="manager-container">
+  <!-- Toast Notification -->
+  <div class="toast" [class.show]="toastVisible">
+    <div class="toast-content">
+      <span class="toast-icon">🔔</span>
+      <span class="toast-message">{{ toastMessage }}</span>
+      <button class="toast-close" (click)="hideToast()">✕</button>
+    </div>
+  </div>
+
+  <header class="manager-header">
+    <h1>🖥️ Manager Dashboard</h1>
+    <p class="subtitle">Monitora e gestisci tutti i client connessi in tempo reale</p>
+    <p class="client-id" *ngIf="identity">
+      Il tuo ID: <code>{{ identity.clientId }}</code>
+    </p>
+  </header>
+
+  <!-- Connection Status Bar -->
+  <div class="status-bar" [class.connected]="isConnected" [class.disconnected]="!isConnected">
+    <span class="status-indicator"></span>
+    <span class="status-text">{{ isConnected ? 'Connesso' : 'Disconnesso' }}</span>
+    <button 
+      class="btn btn-small" 
+      (click)="isConnected ? disconnect() : connect()"
+      [disabled]="isConnecting"
+    >
+      {{ isConnecting ? 'Connessione...' : (isConnected ? 'Disconnetti' : 'Connetti') }}
+    </button>
+  </div>
+
+  <div class="error-message" *ngIf="error">
+    ⚠️ {{ error }}
+  </div>
+
+  <div class="dashboard-grid" *ngIf="isConnected">
+    <!-- Hub Status Panel -->
+    <section class="panel hub-panel">
+      <h2>📡 Hub Status</h2>
+      <div class="hub-list">
+        <div 
+          *ngFor="let hub of hubStates" 
+          class="hub-item"
+          [class]="getStateClass(hub.state)"
+        >
+          <span class="hub-name">{{ hub.name }}</span>
+          <span class="hub-state-badge">{{ hub.state }}</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Connected Clients Overview -->
+    <section class="panel clients-panel">
+      <div class="panel-header">
+        <h2>👥 Client Connessi</h2>
+        <button class="btn btn-small btn-refresh" (click)="refreshClients()">🔄 Aggiorna</button>
+      </div>
+      
+      <div class="clients-stats">
+        <div class="stat">
+          <span class="stat-value">{{ connectedClients.length }}</span>
+          <span class="stat-label">Totali</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value">{{ tablets.length }}</span>
+          <span class="stat-label">📱 Tablet</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value">{{ managers.length }}</span>
+          <span class="stat-label">🖥️ Manager</span>
+        </div>
+      </div>
+
+      <div class="clients-list">
+        <div 
+          *ngFor="let client of connectedClients" 
+          class="client-card"
+          [class.is-tablet]="client.deviceType === 'tablet'"
+          [class.is-manager]="client.deviceType === 'manager'"
+          [class.is-me]="client.deviceId === identity?.clientId"
+          [class.selected]="client.deviceId === selectedClientId"
+          (click)="selectClient(client.deviceId)"
+        >
+          <div class="client-icon">{{ client.deviceType === 'tablet' ? '📱' : '🖥️' }}</div>
+          <div class="client-info">
+            <div class="client-name">
+              {{ client.deviceName }}
+              <span class="badge" *ngIf="client.deviceId === identity?.clientId">Tu</span>
+            </div>
+            <div class="client-id">{{ client.deviceId }}</div>
+            <div class="client-time">Connesso: {{ formatDateTime(client.connectedAt) }}</div>
+          </div>
+          <div class="client-select" *ngIf="client.deviceId !== identity?.clientId">
+            {{ selectedClientId === client.deviceId ? '✓' : 'Seleziona' }}
+          </div>
+        </div>
+
+        <div *ngIf="connectedClients.length === 0" class="no-data">
+          Nessun client connesso. Apri altre tab con /tablet per vederli apparire qui!
+        </div>
+      </div>
+    </section>
+
+    <!-- Messaging Panel -->
+    <section class="panel messages-panel">
+      <h2>💬 Messaggi</h2>
+
+      <!-- Broadcast Message -->
+      <div class="message-section">
+        <h3>📢 Broadcast (a tutti)</h3>
+        <div class="message-input-group">
+          <input 
+            type="text" 
+            [(ngModel)]="broadcastMessage" 
+            placeholder="Scrivi un messaggio per tutti..."
+            (keyup.enter)="sendBroadcast()"
+          />
+          <button class="btn btn-send" (click)="sendBroadcast()">Invia a tutti</button>
+        </div>
+      </div>
+
+      <!-- Private Message -->
+      <div class="message-section" *ngIf="selectedClientId">
+        <h3>🔒 Messaggio privato</h3>
+        <div class="message-input-group">
+          <input 
+            type="text" 
+            [(ngModel)]="privateMessage" 
+            placeholder="Messaggio privato..."
+            (keyup.enter)="sendPrivateMessage()"
+          />
+          <button class="btn btn-send-private" (click)="sendPrivateMessage()">Invia privato</button>
+        </div>
+      </div>
+
+      <!-- Messages Log -->
+      <div class="messages-log">
+        <div class="log-header">
+          <span>Log messaggi</span>
+          <button class="btn btn-small" (click)="clearMessages()" *ngIf="messages.length > 0">
+            Pulisci
+          </button>
+        </div>
+        <div class="messages-list">
+          <div 
+            *ngFor="let msg of messages" 
+            class="log-message"
+            [class.is-mine]="msg.senderId === identity?.clientId"
+          >
+            <span class="privacy-icon" [title]="isMessagePrivate(msg) ? 'Privato' : 'Pubblico'">
+              {{ isMessagePrivate(msg) ? '🔒' : '📢' }}
+            </span>
+            <span class="log-time">{{ formatTime(msg.timestamp) }}</span>
+            <span class="log-sender">{{ msg.senderName }}:</span>
+            <span class="log-text">{{ msg.message }}</span>
+          </div>
+          <div *ngIf="messages.length === 0" class="no-data">
+            Nessun messaggio ancora.
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Not Connected State -->
+  <div class="not-connected" *ngIf="!isConnected && !isConnecting">
+    <p>Non sei connesso. Clicca "Connetti" per iniziare a monitorare i client.</p>
+  </div>
+</div>
